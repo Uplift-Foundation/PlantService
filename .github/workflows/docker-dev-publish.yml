@@ -1,0 +1,117 @@
+name: Push to Docker
+
+on:
+  schedule:
+    - cron: '29 1 * * *'
+  push:
+    branches: [ "develop", "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "develop" ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: wtvamp/plantservice
+  SERVICE_DIR: PlantService
+
+jobs:
+  build:
+
+    runs-on: "${{ vars.RUNNER_TYPE || 'ubuntu-latest' }}"
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    env:
+      GH_PAT_AVAILABLE: ${{ secrets.GH_PAT != '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: PlantService
+
+      - name: Checkout FMN.Vault shared library
+        uses: actions/checkout@v4
+        if: env.GH_PAT_AVAILABLE == 'true'
+        with:
+          repository: Uplift-Foundation/FMN-Core
+          sparse-checkout: FMN.Vault
+          sparse-checkout-cone-mode: true
+          path: _fmn-core
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Checkout FMN.Vault (fallback via GitHub API)
+        if: env.GH_PAT_AVAILABLE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "GH_PAT not configured. Downloading FMN.Vault via GitHub API..."
+          mkdir -p _fmn-core
+          gh api repos/Uplift-Foundation/FMN-Core/tarball \
+            -H "Accept: application/vnd.github+json" \
+            > /tmp/fmn-core.tar.gz 2>/dev/null \
+          && tar -xzf /tmp/fmn-core.tar.gz -C _fmn-core --strip-components=1 \
+          || { echo "::error::Cannot access FMN-Core. Add GH_PAT secret with repo scope to this repository."; exit 1; }
+
+      - name: Prepare build context
+        run: cp -r _fmn-core/FMN.Vault ./FMN.Vault
+
+      - name: Import secrets from Vault
+        if: github.event_name != 'pull_request'
+        id: vault
+        continue-on-error: true
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://vault.uplifttech.org
+          method: jwt
+          role: fmn-cicd
+          jwtGithubAudience: https://github.com/Uplift-Foundation
+          secrets: |
+            secret/data/fmn/cicd/dockerhub username | VAULT_DOCKER_USERNAME ;
+            secret/data/fmn/cicd/dockerhub password | VAULT_DOCKER_PASSWORD
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.VAULT_DOCKER_USERNAME || secrets.DOCKER_USERNAME }}
+          password: ${{ env.VAULT_DOCKER_PASSWORD || secrets.DOCKER_PASSWORD }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
+        with:
+          context: .
+          file: ${{ env.SERVICE_DIR }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign the published Docker image
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
