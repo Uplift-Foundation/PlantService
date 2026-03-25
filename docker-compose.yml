@@ -1,0 +1,12 @@
+services:
+  plantservice:
+    restart: always
+    image: plantservice
+    build:
+      context: ..
+      dockerfile: PlantService/Dockerfile
+    environment:
+      ConnectionString__DefaultConnection: ${ConnectionString__DefaultConnection}
+      Keycloak__OAuthClientId: ${Keycloak__OAuthClientId}
+      Keycloak__Authority: ${Keycloak__Authority}
+      Keycloak__Audience: ${Keycloak__Audience}

@@ -1,0 +1,31 @@
+services:
+  plantdb:
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5441:5432"
+
+  plantservice:
+    ports:
+      - "90:8080"
+    environment:
+      ConnectionString__DefaultConnection: ${ConnectionString__DefaultConnection}
+      Keycloak__OAuthClientId: ${Keycloak__OAuthClientId}
+      Keycloak__OAuthClientSecret: ${Keycloak__OAuthClientSecret}
+      Keycloak__Authority: ${Keycloak__Authority}
+      Keycloak__Audience: ${Keycloak__Audience}
+      VAULT_ENABLED: ${VAULT_ENABLED:-false}
+      VAULT_ADDR: ${VAULT_ADDR:-https://vault.uplifttech.org}
+      VAULT_ROLE_ID: ${VAULT_ROLE_ID:-}
+      VAULT_SECRET_ID: ${VAULT_SECRET_ID:-}
+      ASPNETCORE_ENVIRONMENT: Development
+    depends_on:
+      plantdb:
+        condition: service_healthy
