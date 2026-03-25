@@ -1,0 +1,56 @@
+version: '3.4'
+
+services:
+  plantdb:
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      forgetmenot:
+    volumes:
+      - plant_db_storage:/var/lib/postgresql/data
+  plant_postgres_exporter:
+    image: wrouesnel/postgres_exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD}@plantdb:5432/${POSTGRES_DB}?sslmode=disable"
+    ports:
+      - "9194:9187"
+    networks:
+      forgetmenot:
+    depends_on:
+      - plantdb
+  plantservice:
+    ports:
+      - "90:8080"
+    environment:
+      VIRTUAL_HOST: forgetmenot.uplifttech.org, forgetmenot4.uplifttech.org
+      VIRTUAL_PORT: 8080
+      VIRTUAL_PROTO: http
+      LETSENCRYPT_HOST: forgetmenot.uplifttech.org, forgetmenot4.uplifttech.org
+      LETSENCRYPT_EMAIL: wthompson@uplifttech.org
+      ConnectionString__DefaultConnection: ${ConnectionString__DefaultConnection}
+      Keycloak__OAuthClientId: ${Keycloak__OAuthClientId}
+      Keycloak__OAuthClientSecret: ${Keycloak__OAuthClientSecret}
+      Keycloak__Authority: ${Keycloak__Authority}
+      Keycloak__Audience: ${Keycloak__Audience}
+      ASPNETCORE_ENVIRONMENT: Release
+    networks:
+      forgetmenot:
+    depends_on:
+      plantdb:
+        condition: service_healthy
+
+networks:
+  forgetmenot:
+    external: true
+
+volumes:
+  plant_db_storage:
+    external: true
