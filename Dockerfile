@@ -3,13 +3,14 @@ WORKDIR /app
 EXPOSE 80
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-COPY PlantService/nuget.config /nuget.config
-RUN dotnet tool install --global dotnet-ef --version 10.0.0 --configfile /nuget.config
-ENV PATH="${PATH}:/root/.dotnet/tools"
+ENV DOTNET_NUGET_SIGNATURE_VERIFICATION=false \
+    NUGET_ENHANCED_NETWORK_ENABLED=true
 WORKDIR /src
 COPY ["PlantService/PlantService.csproj", "PlantService/"]
 COPY ["FMN.Vault/FMN.Vault.csproj", "FMN.Vault/"]
 RUN dotnet restore "PlantService/PlantService.csproj"
+RUN dotnet tool install --global dotnet-ef --version 10.0.0
+ENV PATH="${PATH}:/root/.dotnet/tools"
 COPY PlantService/ PlantService/
 COPY FMN.Vault/ FMN.Vault/
 WORKDIR "/src/PlantService"
